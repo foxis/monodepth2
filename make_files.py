@@ -24,6 +24,10 @@ def make_files(args):
         for sequence in sequences:
             images = os.listdir(os.path.join(path, sequence))
 
+            for a, b in zip(images[:-1], images[1:]):
+                if int(b[:-4]) - int(a[:-4]) > 1:
+                    print(sequence, "missing", a, b)
+
             valid_images = []
             for img in images:
                 try:
@@ -32,8 +36,8 @@ def make_files(args):
                             _img.convert('RGB')
 
                     valid_images += [img]
-                except:
-                    pass
+                except Exception as err:
+                    print(sequence, img, err)
 
             print(f"Sequence {sequence} images: {len(images)}, valid: {len(valid_images)}")
 
