@@ -1,5 +1,6 @@
 import argparse
 import os
+from PIL import Image
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -22,7 +23,21 @@ def make_files(args):
     with open(files_path, "w") as f:
         for sequence in sequences:
             images = os.listdir(os.path.join(path, sequence))
-            f.writelines([f"{sequence} {img[:-4]} 0\n" for img in images])
+
+            valid_images = []
+            for img in images:
+                try:
+                    with open(os.path.join(path, sequence, img), 'rb') as _f:
+                        with Image.open(_f) as _img:
+                            _img.convert('RGB')
+
+                    valid_images += [img]
+                except:
+                    pass
+
+            print(f"Sequence {sequence} images: {len(images)}, valid: {len(valid_images)}")
+
+            f.writelines([f"{sequence} {img[:-4]} 0\n" for img in valid_images[1:-1]])
 
 
 if __name__ == '__main__':
