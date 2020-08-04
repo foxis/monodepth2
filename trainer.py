@@ -23,7 +23,6 @@ from layers import *
 
 import datasets
 import networks
-from IPython import embed
 
 
 class Trainer:
@@ -112,6 +111,7 @@ class Trainer:
 
         # data
         datasets_dict = {"kitti": datasets.KITTIRAWDataset,
+                         "roverc": datasets.RoverCDataset,
                          "kitti_odom": datasets.KITTIOdomDataset}
         self.dataset = datasets_dict[self.opt.dataset]
 
