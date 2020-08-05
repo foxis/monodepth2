@@ -1,0 +1,1 @@
+python train.py --width 320 --height 320 --split roverc --data_path d:\datasets\Maixpy\dataset\roverc --dataset roverc --no_eval --batch_size 4 --log_dir logs --num_workers 8 --load_weights_folder logs\mdp\models\weights_19 --learning_rate 1e-5 --model_name ft_320x320
