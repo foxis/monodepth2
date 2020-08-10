@@ -21,7 +21,8 @@ from torchvision import transforms, datasets
 import networks
 from layers import disp_to_depth
 from utils import download_model_if_doesnt_exist
-
+from layers import transformation_from_parameters
+from evaluate_pose import dump_xyz
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -41,7 +42,8 @@ def parse_args():
                             "mono_1024x320",
                             "stereo_1024x320",
                             "mono+stereo_1024x320",
-                            "weights_19"
+                            "weights_19",
+                            "weights_5",
                         ])
     parser.add_argument('--ext', type=str,
                         help='image extension to search for in folder', default="jpg")
@@ -70,7 +72,7 @@ def test_simple(args):
     depth_decoder_path = os.path.join(model_path, "depth.pth")
 
     # LOADING PRETRAINED MODEL
-    print("   Loading pretrained encoder")
+    print("   Loading pretrained depth encoder")
     encoder = networks.ResnetEncoder(18, False)
     loaded_dict_enc = torch.load(encoder_path, map_location=device)
 
@@ -82,7 +84,7 @@ def test_simple(args):
     encoder.to(device)
     encoder.eval()
 
-    print("   Loading pretrained decoder")
+    print("   Loading pretrained depth decoder")
     depth_decoder = networks.DepthDecoder(
         num_ch_enc=encoder.num_ch_enc, scales=range(4))
 
@@ -104,16 +106,30 @@ def test_simple(args):
     else:
         raise Exception("Can not find args.image_path: {}".format(args.image_path))
 
-    print("-> Predicting on {:d} test images".format(len(paths)))
+    # don't try to predict disparity for a disparity image!
+    paths = [img for img in paths if not img.endswith("_disp.jpg")]
+
+    if len(paths) > 3:
+        print("   Loading Pose network")
+        pose_encoder_path = os.path.join(model_path, "pose_encoder.pth")
+        pose_decoder_path = os.path.join(model_path, "pose.pth")
+
+        pose_encoder = networks.ResnetEncoder(18, False, 2)
+        pose_encoder.load_state_dict(torch.load(pose_encoder_path))
+
+        pose_decoder = networks.PoseDecoder(pose_encoder.num_ch_enc, 1, 2)
+        pose_decoder.load_state_dict(torch.load(pose_decoder_path))
+
+        pose_encoder.to(device)
+        pose_encoder.eval()
+        pose_decoder.to(device)
+        pose_decoder.eval()
 
     # PREDICTING ON EACH IMAGE IN TURN
     with torch.no_grad():
+        print("-> Predicting disparities on {:d} test images".format(len(paths)))
+        processed_images = []
         for idx, image_path in enumerate(paths):
-
-            if image_path.endswith("_disp.jpg"):
-                # don't try to predict disparity for a disparity image!
-                continue
-
             # Load image and preprocess
             input_image = pil.open(image_path).convert('RGB')
             original_width, original_height = input_image.size
@@ -122,6 +138,8 @@ def test_simple(args):
 
             # PREDICTION
             input_image = input_image.to(device)
+            processed_images += [input_image]
+
             features = encoder(input_image)
             outputs = depth_decoder(features)
 
@@ -143,11 +161,42 @@ def test_simple(args):
             colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
             im = pil.fromarray(colormapped_im)
 
-            name_dest_im = os.path.join(output_directory, "{}_disp.jpeg".format(output_name))
+            name_dest_im = os.path.join(output_directory, "{}_disp.jpg".format(output_name))
             im.save(name_dest_im)
 
             print("   Processed {:d} of {:d} images - saved prediction to {}".format(
                 idx + 1, len(paths), name_dest_im))
+
+        if len(processed_images) > 3:
+            pred_poses = []
+            rotations = []
+            translations = []
+            print("-> Predicting poses on {:d} test images".format(len(processed_images)))
+            for idx, (a, b) in enumerate(zip(processed_images[:-1], processed_images[1:])):
+                all_color_aug = torch.cat([a, b], 1)
+
+                features = [pose_encoder(all_color_aug)]
+                axisangle, translation = pose_decoder(features)
+
+                rotations += [axisangle[:, 0].cpu().numpy()]
+                translations += [translation[:, 0].cpu().numpy()]
+
+                pred_poses.append(transformation_from_parameters(axisangle[:, 0], translation[:, 0]).cpu().numpy())
+            pred_poses = np.concatenate(pred_poses)
+            save_path = os.path.join(args.image_path, "pred_poses.npy")
+            np.save(save_path, pred_poses)
+            print("-> Pose Predictions saved to", save_path)
+            local_xyzs = np.array(dump_xyz(pred_poses))
+            save_path = os.path.join(args.image_path, "pred_xyzs.npy")
+            np.save(save_path, local_xyzs)
+            print("-> Predicted path saved to", save_path)
+
+            save_path = os.path.join(args.image_path, "axisangle.npy")
+            np.save(save_path, np.concatenate(rotations))
+            print("-> Predicted axis angles saved to", save_path)
+            save_path = os.path.join(args.image_path, "translation.npy")
+            np.save(save_path, np.concatenate(translations))
+            print("-> Predicted translations saved to", save_path)
 
     print('-> Done!')
 
